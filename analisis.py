@@ -2,16 +2,10 @@
 
 # 1. Cargar librerías
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-# Configurar visualizaciones
-plt.style.use('ggplot')
-sns.set()
 
 # 2. Cargar el dataset
-df = pd.read_csv('US_Accidents_Dec21_updated.csv')  # Cambia el nombre si el archivo es diferente
-df.shape
+df = pd.read_csv('US_Accidents_March23.csv') 
+print(df.head)
 ## 2. Cargar y explorar los datos
 # ¿Cuántos accidentes hay por estado?
 
