@@ -1,80 +1,78 @@
 import pandas as pd
-from bokeh.io import curdoc
-from bokeh.models import ColumnDataSource, HoverTool, Select, RadioButtonGroup
 from bokeh.plotting import figure
-from bokeh.layouts import column, row
-from bokeh.palettes import Category10
+from bokeh.models import ColumnDataSource, HoverTool, Select
+from bokeh.layouts import column
+from bokeh.io import curdoc
+import os
 
-# === 1. Cargar tus datos ===
-df = pd.read_csv('Accidentes por estado y severidad.csv', parse_dates=['Start_Time'])
+# === Ruta absoluta del archivo CSV ===
 
-# Si no tienes una columna de conteo, la creamos
-if 'Accidents_Count' not in df.columns:
-    df['Accidents_Count'] = 1
+csv_path = r"c:\Users\Laura\Desktop\Data Scientist\Analisis exploratorio de datos con Python\US_Accidents_March23.csv"
 
-# === 2. Función para obtener top 10 estados ===
-def get_top_states(mode='total'):
-    if mode == 'total':
-        top = df.groupby('State')['Accidents_Count'].sum().nlargest(10).index
-    else:  # por día
-        top = df.groupby('State')['Accidents_Count'].mean().nlargest(10).index
-    return df[df['State'].isin(top)]
+# === Verificación por si el archivo no se encuentra ===
+if not os.path.exists(csv_path):
+    raise FileNotFoundError(f"No se encontró el archivo CSV en: {csv_path}")
 
-# === 3. Crear dataset inicial (modo total) ===
-mode = 'total'
-df_filtered = get_top_states(mode)
+# === Cargar datos ===
+df = pd.read_csv(csv_path, parse_dates=['Start_Time'], rows=1000000)
 
-# === 4. Crear fuente de datos ===
-source = ColumnDataSource(df_filtered)
+# === Filtrar accidentes graves ===
+df_graves = df[df['Severity'] == 4].copy()
 
-# === 5. Configurar figura ===
-p = figure(
-    x_axis_type='datetime',
-    width=900,
-    height=500,
-    title='Accidentes graves por día - Top 10 estados',
-    toolbar_location='above'
+# === Agrupar por Estado y Día ===
+df_graves_grouped = (
+    df_graves.groupby(['State', pd.Grouper(key='Start_Time', freq='D')])
+    .size()
+    .reset_index(name='Grave_Accidents')
 )
 
-# Añadir líneas por estado
-colors = Category10[10]
-for i, estado in enumerate(df_filtered['State'].unique()):
-    subset = df_filtered[df_filtered['State'] == estado]
-    src = ColumnDataSource(subset)
-    p.line(
-        'Start_Time', 'Accidents_Count',
-        source=src, line_width=2, color=colors[i % 10],
-        legend_label=estado
-    )
+# === Calcular total por estado para filtrar los top 10 ===
+top_states = (
+    df_graves_grouped.groupby('State')['Grave_Accidents']
+    .sum()
+    .nlargest(10)
+    .index
+)
 
-# Hover (tooltip)
-p.add_tools(HoverTool(
-    tooltips=[
-        ('Estado', '@State'),
-        ('Fecha', '@Start_Time{%F}'),
-        ('Accidentes graves', '@Accidents_Count')
-    ],
-    formatters={'@Start_Time': 'datetime'}
-))
+df_top = df_graves_grouped[df_graves_grouped['State'].isin(top_states)]
 
-p.legend.location = 'top_left'
-p.legend.click_policy = 'hide'
+# === Crear fuente inicial (primer estado del top 10) ===
+state_default = top_states[0]
+source = ColumnDataSource(df_top[df_top['State'] == state_default])
+
+# === Crear figura ===
+p = figure(
+    x_axis_type='datetime',
+    title=f"Accidentes graves diarios en {state_default}",
+    width=800, height=400,
+    background_fill_color="#f9fafc"
+)
+
+p.line('Start_Time', 'Grave_Accidents', source=source, line_width=2, color="#0077b6")
+p.circle('Start_Time', 'Grave_Accidents', source=source, size=5, color="#00b4d8", alpha=0.8)
+
 p.xaxis.axis_label = "Fecha"
 p.yaxis.axis_label = "Número de accidentes graves"
 
-# === 6. Control de filtro ===
-filter_selector = RadioButtonGroup(labels=["Total", "Por día"], active=0)
+p.add_tools(HoverTool(
+    tooltips=[("Fecha", "@Start_Time{%F}"), ("Accidentes", "@Grave_Accidents")],
+    formatters={"@Start_Time": "datetime"}
+))
 
-def update_filter(attr, old, new):
-    mode = 'total' if filter_selector.active == 0 else 'day'
-    new_data = get_top_states(mode)
+# === Selector de estado ===
+select = Select(title="Selecciona un estado:", value=state_default, options=list(top_states))
+
+def update_plot(attr, old, new):
+    new_state = select.value
+    new_data = df_top[df_top['State'] == new_state]
     source.data = ColumnDataSource(new_data).data
-    p.title.text = f"Accidentes graves ({'totales' if mode=='total' else 'por día promedio'}) - Top 10 estados"
+    p.title.text = f"Accidentes graves diarios en {new_state}"
 
-filter_selector.on_change('active', update_filter)
+select.on_change('value', update_plot)
 
-# === 7. Layout final ===
-layout = column(filter_selector, p)
+# === Layout final ===
+layout = column(select, p)
 
+# 🔹 Agregar layout al documento Bokeh
 curdoc().add_root(layout)
 curdoc().title = "Accidentes graves por estado"
